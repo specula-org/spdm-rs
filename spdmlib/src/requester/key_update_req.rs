@@ -8,6 +8,9 @@ use crate::error::{
 };
 use crate::message::*;
 use crate::requester::*;
+use crate::spdm_trace::{
+    self, TraceErrorKind, TraceKeyUpdateOp, TraceMessage, TraceRole,
+};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -115,6 +118,27 @@ impl RequesterContext {
                                 update_responder,
                                 true,
                             )?;
+                            spdm_trace::note_key_update_ack(match key_update_rsp.key_update_operation {
+                                SpdmKeyUpdateOperation::SpdmUpdateSingleKey => TraceKeyUpdateOp::UpdateSingle,
+                                SpdmKeyUpdateOperation::SpdmUpdateAllKeys => TraceKeyUpdateOp::UpdateAll,
+                                SpdmKeyUpdateOperation::SpdmVerifyNewKey => TraceKeyUpdateOp::VerifyNewKey,
+                                _ => TraceKeyUpdateOp::VerifyNewKey,
+                            });
+                            spdm_trace::emit_key_event(
+                                TraceRole::Requester,
+                                &self.common,
+                                session_id,
+                                "HandleSpdmKeyUpdateOpResponse",
+                                TraceMessage {
+                                    op: Some(match key_update_rsp.key_update_operation {
+                                        SpdmKeyUpdateOperation::SpdmUpdateSingleKey => TraceKeyUpdateOp::UpdateSingle,
+                                        SpdmKeyUpdateOperation::SpdmUpdateAllKeys => TraceKeyUpdateOp::UpdateAll,
+                                        SpdmKeyUpdateOperation::SpdmVerifyNewKey => TraceKeyUpdateOp::VerifyNewKey,
+                                        _ => TraceKeyUpdateOp::VerifyNewKey,
+                                    }),
+                                    ..TraceMessage::default()
+                                },
+                            );
                             Ok(())
                         } else {
                             error!("!!! key_update : fail !!!\n");
@@ -124,6 +148,20 @@ impl RequesterContext {
                                 update_responder,
                                 false,
                             )?;
+                            spdm_trace::note_key_update_rollback(
+                                session.get_requester_backup_valid(),
+                                session.get_responder_backup_valid(),
+                            );
+                            spdm_trace::emit_key_event(
+                                TraceRole::Requester,
+                                &self.common,
+                                session_id,
+                                "HandleSpdmKeyUpdateOpResponse",
+                                TraceMessage {
+                                    error: Some(TraceErrorKind::Invalid),
+                                    ..TraceMessage::default()
+                                },
+                            );
                             Err(SPDM_STATUS_INVALID_MSG_FIELD)
                         }
                     }
@@ -141,6 +179,20 @@ impl RequesterContext {
                             update_responder,
                             false,
                         )?;
+                        spdm_trace::note_key_update_rollback(
+                            session.get_requester_backup_valid(),
+                            session.get_responder_backup_valid(),
+                        );
+                        spdm_trace::emit_key_event(
+                            TraceRole::Requester,
+                            &self.common,
+                            session_id,
+                            "HandleSpdmKeyUpdateOpResponse",
+                            TraceMessage {
+                                error: Some(TraceErrorKind::Unexpected),
+                                ..TraceMessage::default()
+                            },
+                        );
                         self.spdm_handle_error_response_main(
                             Some(session_id),
                             receive_buffer,

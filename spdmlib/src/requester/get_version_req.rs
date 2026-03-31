@@ -8,6 +8,7 @@ use crate::error::{
 use crate::message::*;
 use crate::protocol::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -108,6 +109,17 @@ impl RequesterContext {
 
                         self.common.append_message_a(send_buffer)?;
                         self.common.append_message_a(&receive_buffer[..used])?;
+                        spdm_trace::note_connection(
+                            TraceRole::Requester,
+                            crate::common::SpdmConnectionState::SpdmConnectionAfterVersion,
+                        );
+                        spdm_trace::emit_local_event(
+                            TraceRole::Requester,
+                            &self.common,
+                            None,
+                            "HandleSpdmVersionResponse",
+                            TraceMessage::default(),
+                        );
 
                         Ok(())
                     } else {

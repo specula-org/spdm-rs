@@ -21,4 +21,7 @@ mod requester_tests;
 mod responder_tests;
 
 #[cfg(test)]
+mod trace_harness;
+
+#[cfg(test)]
 mod watchdog_impl_sample;

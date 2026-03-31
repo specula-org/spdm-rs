@@ -18,6 +18,7 @@ use crate::error::{
 use crate::message::*;
 use crate::protocol::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 extern crate alloc;
 use crate::common::opaque::SpdmOpaqueStruct;
 use crate::secret;
@@ -658,6 +659,14 @@ impl ResponderContext {
                 .runtime_info
                 .set_last_session_id(Some(session_id));
         }
+
+        spdm_trace::emit_local_event(
+            TraceRole::Responder,
+            &self.common,
+            Some(session_id),
+            "WriteSpdmKeyExchangeResponse",
+            TraceMessage::default(),
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

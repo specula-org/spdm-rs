@@ -11,6 +11,9 @@ use crate::config::{self, MAX_SPDM_MSG_SIZE, RECEIVER_BUFFER_SIZE};
 use crate::error::*;
 use crate::message::*;
 use crate::protocol::{SpdmRequestCapabilityFlags, SpdmResponseCapabilityFlags};
+use crate::spdm_trace::{
+    self, TraceErrorKind, TraceMessage, TraceRole, TraceTranscriptPhase,
+};
 use crate::watchdog::{reset_watchdog, start_watchdog};
 use codec::{Codec, Reader, Writer};
 extern crate alloc;
@@ -33,14 +36,10 @@ impl ResponderContext {
         config_info: crate::common::SpdmConfigInfo,
         provision_info: crate::common::SpdmProvisionInfo,
     ) -> Self {
-        ResponderContext {
-            common: crate::common::SpdmContext::new(
-                device_io,
-                transport_encap,
-                config_info,
-                provision_info,
-            ),
-        }
+        let mut common =
+            crate::common::SpdmContext::new(device_io, transport_encap, config_info, provision_info);
+        common.trace_role = TraceRole::Responder;
+        ResponderContext { common }
     }
 
     #[maybe_async::maybe_async]
@@ -154,6 +153,13 @@ impl ResponderContext {
             self.common
                 .runtime_info
                 .set_connection_state(SpdmConnectionState::SpdmConnectionAfterVersion);
+            spdm_trace::emit_local_event(
+                TraceRole::Responder,
+                &self.common,
+                None,
+                "WriteSpdmVersionResponse",
+                TraceMessage::default(),
+            );
         } else if opcode == SpdmRequestResponseCode::SpdmResponseCapabilities.get_u8() {
             self.common
                 .runtime_info
@@ -178,10 +184,24 @@ impl ResponderContext {
                     .runtime_info
                     .set_connection_state(SpdmConnectionState::SpdmConnectionAfterCertificate);
             }
+            spdm_trace::emit_local_event(
+                TraceRole::Responder,
+                &self.common,
+                session_id,
+                "WriteSpdmCertificateResponse",
+                TraceMessage::default(),
+            );
         } else if opcode == SpdmRequestResponseCode::SpdmResponseChallengeAuth.get_u8() {
             self.common
                 .runtime_info
                 .set_connection_state(SpdmConnectionState::SpdmConnectionAuthenticated);
+            spdm_trace::emit_local_event(
+                TraceRole::Responder,
+                &self.common,
+                None,
+                "WriteSpdmChallengeResponse",
+                TraceMessage::default(),
+            );
         } else if opcode == SpdmRequestResponseCode::SpdmResponseFinishRsp.get_u8()
             && session_id.is_none()
         {
@@ -203,6 +223,8 @@ impl ResponderContext {
 
                 session.heartbeat_period
             };
+            spdm_trace::note_transcript(TraceRole::Responder, TraceTranscriptPhase::Established);
+            spdm_trace::observe_local_state(TraceRole::Responder, &self.common, Some(session_id));
 
             if self
                 .common
@@ -243,6 +265,8 @@ impl ResponderContext {
 
                 session.heartbeat_period
             };
+            spdm_trace::note_transcript(TraceRole::Responder, TraceTranscriptPhase::Established);
+            spdm_trace::observe_local_state(TraceRole::Responder, &self.common, Some(session_id));
 
             if self
                 .common
@@ -652,12 +676,23 @@ impl ResponderContext {
                         | SpdmRequestResponseCode::SpdmRequestKeyExchange
                         | SpdmRequestResponseCode::SpdmRequestPskExchange
                         | SpdmRequestResponseCode::SpdmRequestFinish
-                        | SpdmRequestResponseCode::SpdmRequestPskFinish => self
-                            .handle_error_request(
+                        | SpdmRequestResponseCode::SpdmRequestPskFinish => {
+                            spdm_trace::emit_local_event(
+                                TraceRole::Responder,
+                                &self.common,
+                                Some(session_id),
+                                "DispatchSecuredMessageUnexpectedRequest",
+                                TraceMessage {
+                                    error: Some(TraceErrorKind::Unexpected),
+                                    ..TraceMessage::default()
+                                },
+                            );
+                            self.handle_error_request(
                                 SpdmErrorCode::SpdmErrorUnexpectedRequest,
                                 bytes,
                                 writer,
-                            ),
+                            )
+                        }
 
                         SpdmRequestResponseCode::SpdmRequestResponseIfReady => self
                             .handle_error_request(
@@ -768,21 +803,45 @@ impl ResponderContext {
                         }
                     }
 
+                    {
+                        spdm_trace::emit_local_event(
+                            TraceRole::Responder,
+                            &self.common,
+                            None,
+                            "DispatchMessageUnexpectedRequest",
+                            TraceMessage {
+                                error: Some(TraceErrorKind::Unexpected),
+                                ..TraceMessage::default()
+                            },
+                        );
+                        self.handle_error_request(
+                            SpdmErrorCode::SpdmErrorUnexpectedRequest,
+                            bytes,
+                            writer,
+                        )
+                    }
+                }
+
+                SpdmRequestResponseCode::SpdmRequestPskFinish
+                | SpdmRequestResponseCode::SpdmRequestHeartbeat
+                | SpdmRequestResponseCode::SpdmRequestKeyUpdate
+                | SpdmRequestResponseCode::SpdmRequestEndSession => {
+                    spdm_trace::emit_local_event(
+                        TraceRole::Responder,
+                        &self.common,
+                        None,
+                        "DispatchMessageUnexpectedRequest",
+                        TraceMessage {
+                            error: Some(TraceErrorKind::Unexpected),
+                            ..TraceMessage::default()
+                        },
+                    );
                     self.handle_error_request(
                         SpdmErrorCode::SpdmErrorUnexpectedRequest,
                         bytes,
                         writer,
                     )
                 }
-
-                SpdmRequestResponseCode::SpdmRequestPskFinish
-                | SpdmRequestResponseCode::SpdmRequestHeartbeat
-                | SpdmRequestResponseCode::SpdmRequestKeyUpdate
-                | SpdmRequestResponseCode::SpdmRequestEndSession => self.handle_error_request(
-                    SpdmErrorCode::SpdmErrorUnexpectedRequest,
-                    bytes,
-                    writer,
-                ),
 
                 SpdmRequestResponseCode::SpdmRequestResponseIfReady => self.handle_error_request(
                     SpdmErrorCode::SpdmErrorUnsupportedRequest,

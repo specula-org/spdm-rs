@@ -26,7 +26,7 @@ maybe-async = "0.2.7"
 
 spdmlib_crypto_mbedtls = { path = "../../spdmlib_crypto_mbedtls", default-features = false, optional = true }
 spdmlib_crypto_aws_lc = { path = "../../spdmlib_crypto_aws_lc", optional = true }
-aws-lc-rs = { path = "../../external/aws-lc-rs/aws-lc-rs", features = ["unstable"], optional = true }
+aws-lc-rs = { version = "1.16.2", features = ["unstable"], optional = true }
 
 [features]
 default = ["spdm-ring", "spdmlib/hashed-transcript-data", "async-executor"]

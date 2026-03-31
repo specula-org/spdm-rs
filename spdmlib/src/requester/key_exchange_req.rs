@@ -22,6 +22,7 @@ use crate::crypto::SpdmReqExchangeContext;
 
 use crate::error::SpdmResult;
 use crate::message::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -536,6 +537,14 @@ impl RequesterContext {
                                     .runtime_info
                                     .set_last_session_id(Some(session_id));
                             }
+
+                            spdm_trace::emit_local_event(
+                                TraceRole::Requester,
+                                &self.common,
+                                Some(session_id),
+                                "HandleSpdmKeyExchangeResponse",
+                                TraceMessage::default(),
+                            );
 
                             Ok(())
                         } else {

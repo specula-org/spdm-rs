@@ -685,6 +685,14 @@ impl SpdmSession {
         self.session_state
     }
 
+    pub fn get_requester_backup_valid(&self) -> bool {
+        self.requester_backup_valid
+    }
+
+    pub fn get_responder_backup_valid(&self) -> bool {
+        self.responder_backup_valid
+    }
+
     pub fn set_mut_auth_requested(&mut self, mut_auth_requested: SpdmKeyExchangeMutAuthAttributes) {
         self.mut_auth_requested = mut_auth_requested;
     }

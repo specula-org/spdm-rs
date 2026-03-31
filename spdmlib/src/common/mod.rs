@@ -27,6 +27,7 @@ use crate::error::{
     SPDM_STATUS_INVALID_PARAMETER, SPDM_STATUS_INVALID_STATE_LOCAL,
     SPDM_STATUS_SESSION_NUMBER_EXCEED,
 };
+use crate::spdm_trace::{self, TraceRole, TraceTranscriptPhase};
 
 use codec::{enum_builder, Codec, Reader, Writer};
 use session::*;
@@ -137,6 +138,7 @@ pub struct SpdmContext {
     pub config_info: SpdmConfigInfo,
     pub negotiate_info: SpdmNegotiateInfo,
     pub runtime_info: SpdmRuntimeInfo,
+    pub trace_role: TraceRole,
 
     pub provision_info: SpdmProvisionInfo,
     pub peer_info: SpdmPeerInfo,
@@ -172,6 +174,7 @@ impl SpdmContext {
             config_info,
             negotiate_info: SpdmNegotiateInfo::default(),
             runtime_info: SpdmRuntimeInfo::default(),
+            trace_role: TraceRole::Requester,
             provision_info,
             peer_info: SpdmPeerInfo::default(),
             #[cfg(feature = "mut-auth")]
@@ -223,6 +226,7 @@ impl SpdmContext {
 
     pub fn reset_runtime_info(&mut self) {
         self.runtime_info = SpdmRuntimeInfo::default();
+        spdm_trace::note_transcript(self.trace_role, TraceTranscriptPhase::Empty);
     }
 
     pub fn reset_negotiate_info(&mut self) {
@@ -360,6 +364,7 @@ impl SpdmContext {
     }
 
     pub fn append_message_a(&mut self, new_message: &[u8]) -> SpdmResult {
+        spdm_trace::note_transcript(self.trace_role, TraceTranscriptPhase::A);
         self.runtime_info
             .message_a
             .append_message(new_message)
@@ -371,6 +376,7 @@ impl SpdmContext {
     }
 
     pub fn append_message_b(&mut self, new_message: &[u8]) -> SpdmResult {
+        spdm_trace::note_transcript(self.trace_role, TraceTranscriptPhase::B);
         #[cfg(not(feature = "hashed-transcript-data"))]
         {
             self.runtime_info
@@ -413,6 +419,7 @@ impl SpdmContext {
     }
 
     pub fn append_message_c(&mut self, new_message: &[u8]) -> SpdmResult {
+        spdm_trace::note_transcript(self.trace_role, TraceTranscriptPhase::C);
         #[cfg(not(feature = "hashed-transcript-data"))]
         {
             self.runtime_info
@@ -565,6 +572,7 @@ impl SpdmContext {
     }
 
     pub fn append_message_k(&mut self, session_id: u32, new_message: &[u8]) -> SpdmResult {
+        spdm_trace::note_transcript(self.trace_role, TraceTranscriptPhase::K);
         #[cfg(feature = "hashed-transcript-data")]
         let vdm_transcript = self
             .runtime_info

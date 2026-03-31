@@ -11,6 +11,7 @@ use crate::error::*;
 #[cfg(any(feature = "chunk-cap", feature = "mut-auth"))]
 use crate::message::*;
 use crate::protocol::*;
+use crate::spdm_trace::TraceRole;
 
 #[cfg(feature = "chunk-cap")]
 use codec::{Codec, Reader, Writer};
@@ -30,14 +31,10 @@ impl RequesterContext {
         config_info: common::SpdmConfigInfo,
         provision_info: common::SpdmProvisionInfo,
     ) -> Self {
-        RequesterContext {
-            common: common::SpdmContext::new(
-                device_io,
-                transport_encap,
-                config_info,
-                provision_info,
-            ),
-        }
+        let mut common =
+            common::SpdmContext::new(device_io, transport_encap, config_info, provision_info);
+        common.trace_role = TraceRole::Requester;
+        RequesterContext { common }
     }
 
     #[maybe_async::maybe_async]

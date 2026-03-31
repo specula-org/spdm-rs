@@ -10,6 +10,7 @@ use crate::error::{
 use crate::message::*;
 use crate::protocol::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -159,6 +160,21 @@ impl RequesterContext {
                                 }
                                 Some(_session_id) => {}
                             }
+                            spdm_trace::note_connection(
+                                TraceRole::Requester,
+                                crate::common::SpdmConnectionState::SpdmConnectionAfterCertificate,
+                            );
+
+                            spdm_trace::emit_local_event(
+                                TraceRole::Requester,
+                                &self.common,
+                                session_id,
+                                "HandleSpdmCertificatePartialResponse",
+                                TraceMessage {
+                                    slot: Some(slot_id),
+                                    ..TraceMessage::default()
+                                },
+                            );
 
                             Ok((certificate.portion_length, certificate.remainder_length))
                         } else {

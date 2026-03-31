@@ -12,6 +12,7 @@ use crate::error::{
 use crate::message::*;
 use crate::protocol::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -194,6 +195,22 @@ impl RequesterContext {
                                 self.common.reset_message_c();
                                 info!("verify_challenge_auth_signature pass");
                             }
+                            spdm_trace::note_connection(
+                                TraceRole::Requester,
+                                crate::common::SpdmConnectionState::SpdmConnectionAuthenticated,
+                            );
+
+                            spdm_trace::emit_local_event(
+                                TraceRole::Requester,
+                                &self.common,
+                                None,
+                                "HandleSpdmChallengeAuthResponse",
+                                TraceMessage {
+                                    slot: Some(slot_id),
+                                    slot_mask: Some(challenge_auth.slot_mask),
+                                    ..TraceMessage::default()
+                                },
+                            );
 
                             Ok(())
                         } else {

@@ -20,6 +20,7 @@ pcidoe_transport = { path = "../../pcidoe_transport" }
 
 [dev-dependencies]
 env_logger = "*"
+serde_json = "1.0"
 
 [features]
 default = ["hashed-transcript-data", "mut-auth", "chunk-cap"]

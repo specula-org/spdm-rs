@@ -26,6 +26,7 @@ pub mod message;
 pub mod requester;
 pub mod responder;
 pub mod secret;
+pub mod spdm_trace;
 pub mod time;
 pub mod watchdog;
 
