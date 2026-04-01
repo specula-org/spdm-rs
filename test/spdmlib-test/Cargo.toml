@@ -26,5 +26,6 @@ serde_json = "1.0"
 default = ["hashed-transcript-data", "mut-auth", "chunk-cap"]
 hashed-transcript-data = ["spdmlib/hashed-transcript-data"]
 mut-auth = ["spdmlib/mut-auth"]
+mandatory-mut-auth = ["mut-auth", "spdmlib/mandatory-mut-auth"]
 chunk-cap = ["spdmlib/chunk-cap"]
 fips = ["spdmlib/fips"]
