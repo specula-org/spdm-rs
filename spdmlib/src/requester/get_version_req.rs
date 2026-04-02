@@ -17,6 +17,11 @@ impl RequesterContext {
         self.common.reset_context();
 
         let send_used = self.encode_spdm_version(send_buffer)?;
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendGetVersion",
+            spdm_trace::TraceR2Fields::default(),
+        );
         self.send_message(None, &send_buffer[..send_used], false)
             .await?;
         Ok(send_used)
@@ -119,6 +124,15 @@ impl RequesterContext {
                             None,
                             "HandleSpdmVersionResponse",
                             TraceMessage::default(),
+                        );
+                        spdm_trace::emit_r2_event(
+                            TraceRole::Requester,
+                            "HandleSpdmVersionResponse",
+                            spdm_trace::TraceR2Fields {
+                                req_connection_state: Some(crate::common::SpdmConnectionState::SpdmConnectionAfterVersion),
+                                negotiated_version: Some(spdm_trace::version_number(self.common.negotiate_info.spdm_version_sel)),
+                                ..Default::default()
+                            },
                         );
 
                         Ok(())

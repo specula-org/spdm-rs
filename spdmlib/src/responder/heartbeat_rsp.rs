@@ -8,6 +8,7 @@ use crate::error::SPDM_STATUS_INVALID_MSG_FIELD;
 use crate::error::SPDM_STATUS_INVALID_STATE_LOCAL;
 use crate::message::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 
 impl ResponderContext {
     pub fn handle_spdm_heartbeat<'a>(
@@ -77,6 +78,12 @@ impl ResponderContext {
                 Some(writer.used_slice()),
             );
         }
+
+        spdm_trace::emit_r2_event(
+            TraceRole::Responder,
+            "WriteSpdmHeartbeatResponse",
+            TraceR2Fields { session_id: Some(session_id), ..Default::default() },
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

@@ -17,6 +17,7 @@ use crate::error::SPDM_STATUS_INVALID_STATE_PEER;
 use crate::message::*;
 use crate::protocol::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 use crate::watchdog::start_watchdog;
 use config::MAX_SPDM_PSK_CONTEXT_SIZE;
 extern crate alloc;
@@ -430,6 +431,18 @@ impl ResponderContext {
             );
         };
         session.set_session_state(crate::common::session::SpdmSessionState::SpdmSessionHandshaking);
+
+        // R3: WriteSpdmPskExchangeResponse — session created with PSK mode, state = Handshaking
+        spdm_trace::emit_r2_event(
+            TraceRole::Responder,
+            "WriteSpdmPskExchangeResponse",
+            TraceR2Fields {
+                session_id: Some(session_id),
+                session_state: Some("Handshaking"),
+                session_mode: Some("PSK"),
+                ..Default::default()
+            },
+        );
 
         let session = if let Some(session) = self.common.get_immutable_session_via_id(session_id) {
             session

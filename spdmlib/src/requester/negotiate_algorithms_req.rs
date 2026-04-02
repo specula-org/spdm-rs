@@ -9,6 +9,8 @@ use crate::error::{
 use crate::message::*;
 use crate::protocol::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
+extern crate alloc;
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -20,6 +22,18 @@ impl RequesterContext {
         );
 
         let send_used = self.encode_spdm_algorithm(send_buffer)?;
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendNegotiateAlgorithms",
+            TraceR2Fields {
+                proposed: Some({
+                    let mut algos = alloc::vec::Vec::new();
+                    algos.push(spdm_trace::algo_name(self.common.config_info.base_hash_algo));
+                    algos
+                }),
+                ..Default::default()
+            },
+        );
         self.send_message(None, &send_buffer[..send_used], false)
             .await?;
         Ok(send_used)
@@ -358,6 +372,16 @@ impl RequesterContext {
 
                             self.common.append_message_a(send_buffer)?;
                             self.common.append_message_a(&receive_buffer[..used])?;
+
+                            spdm_trace::emit_r2_event(
+                                TraceRole::Requester,
+                                "HandleSpdmAlgorithmsResponse",
+                                TraceR2Fields {
+                                    req_connection_state: Some(crate::common::SpdmConnectionState::SpdmConnectionNegotiated),
+                                    negotiated_algo: Some(spdm_trace::algo_name(self.common.negotiate_info.base_hash_sel)),
+                                    ..Default::default()
+                                },
+                            );
 
                             return Ok(());
                         }

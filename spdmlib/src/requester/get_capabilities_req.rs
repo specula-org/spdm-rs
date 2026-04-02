@@ -6,6 +6,7 @@ use crate::error::{SpdmResult, SPDM_STATUS_ERROR_PEER, SPDM_STATUS_INVALID_MSG_F
 use crate::message::*;
 use crate::protocol::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -17,6 +18,14 @@ impl RequesterContext {
         );
 
         let send_used = self.encode_spdm_capability(send_buffer)?;
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendGetCapabilities",
+            TraceR2Fields {
+                req_caps: Some(spdm_trace::req_cap_flags(self.common.config_info.req_capabilities)),
+                ..Default::default()
+            },
+        );
         self.send_message(None, &send_buffer[..send_used], false)
             .await?;
         Ok(send_used)
@@ -104,6 +113,17 @@ impl RequesterContext {
 
                             self.common.append_message_a(send_buffer)?;
                             self.common.append_message_a(&receive_buffer[..used])?;
+
+                            spdm_trace::emit_r2_event(
+                                TraceRole::Requester,
+                                "HandleSpdmCapabilitiesResponse",
+                                TraceR2Fields {
+                                    req_connection_state: Some(crate::common::SpdmConnectionState::SpdmConnectionAfterCapabilities),
+                                    req_capabilities: Some(spdm_trace::req_cap_flags(self.common.negotiate_info.req_capabilities_sel)),
+                                    rsp_capabilities: Some(spdm_trace::rsp_cap_flags(self.common.negotiate_info.rsp_capabilities_sel)),
+                                    ..Default::default()
+                                },
+                            );
 
                             Ok(())
                         } else {

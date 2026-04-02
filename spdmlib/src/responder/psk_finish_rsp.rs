@@ -10,6 +10,7 @@ use crate::error::SPDM_STATUS_INVALID_MSG_FIELD;
 use crate::error::SPDM_STATUS_INVALID_STATE_LOCAL;
 use crate::message::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 
 impl ResponderContext {
     pub fn handle_spdm_psk_finish<'a>(
@@ -236,6 +237,17 @@ impl ResponderContext {
             self.write_spdm_error(SpdmErrorCode::SpdmErrorUnspecified, 0, writer);
             return (Err(e), Some(writer.used_slice()));
         }
+
+        // R3: WriteSpdmPskFinishResponse — data secret generated, session will be Established
+        spdm_trace::emit_r2_event(
+            TraceRole::Responder,
+            "WriteSpdmPskFinishResponse",
+            TraceR2Fields {
+                session_id: Some(session_id),
+                session_state: Some("Established"),
+                ..Default::default()
+            },
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

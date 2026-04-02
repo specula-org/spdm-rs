@@ -9,6 +9,7 @@ use crate::error::SPDM_STATUS_INVALID_STATE_LOCAL;
 use crate::message::*;
 use crate::protocol::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 
 impl ResponderContext {
     pub fn handle_spdm_version<'a>(
@@ -59,6 +60,7 @@ impl ResponderContext {
 
         // clear cache data
         self.common.reset_context();
+        spdm_trace::note_reset();
 
         if self
             .common
@@ -108,6 +110,17 @@ impl ResponderContext {
                 Some(writer.used_slice()),
             );
         }
+
+        // R2: emit after reset_context and response encoding
+        // Connection state will be set to AfterVersion by context.rs send_message
+        spdm_trace::emit_r2_event(
+            TraceRole::Responder,
+            "WriteSpdmVersionResponse",
+            TraceR2Fields {
+                rsp_connection_state: Some(crate::common::SpdmConnectionState::SpdmConnectionAfterVersion),
+                ..Default::default()
+            },
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

@@ -12,7 +12,7 @@ use crate::error::*;
 use crate::message::*;
 use crate::protocol::{SpdmRequestCapabilityFlags, SpdmResponseCapabilityFlags};
 use crate::spdm_trace::{
-    self, TraceErrorKind, TraceMessage, TraceRole, TraceTranscriptPhase,
+    self, TraceErrorKind, TraceMessage, TraceRole, TraceTranscriptPhase, TraceR2Fields,
 };
 use crate::watchdog::{reset_watchdog, start_watchdog};
 use codec::{Codec, Reader, Writer};
@@ -157,7 +157,7 @@ impl ResponderContext {
                 TraceRole::Responder,
                 &self.common,
                 None,
-                "WriteSpdmVersionResponse",
+                "HandleGetVersion",
                 TraceMessage::default(),
             );
         } else if opcode == SpdmRequestResponseCode::SpdmResponseCapabilities.get_u8() {
@@ -226,6 +226,17 @@ impl ResponderContext {
             spdm_trace::note_transcript(TraceRole::Responder, TraceTranscriptPhase::Established);
             spdm_trace::observe_local_state(TraceRole::Responder, &self.common, Some(session_id));
 
+            // R2: CompleteFinish (cleartext FINISH path)
+            spdm_trace::emit_r2_event(
+                TraceRole::Responder,
+                "CompleteFinish",
+                TraceR2Fields {
+                    session_id: Some(session_id),
+                    session_state: Some("Established"),
+                    ..Default::default()
+                },
+            );
+
             if self
                 .common
                 .negotiate_info
@@ -242,11 +253,23 @@ impl ResponderContext {
 
             self.common.runtime_info.set_last_session_id(None);
         } else if opcode == SpdmRequestResponseCode::SpdmResponseEndSessionAck.get_u8() {
+            let pre_teardown_id = session_id.unwrap();
             let session = self
                 .common
-                .get_session_via_id(session_id.unwrap())
+                .get_session_via_id(pre_teardown_id)
                 .ok_or(SPDM_STATUS_INVALID_STATE_LOCAL)?;
             session.teardown();
+
+            // R2: WriteSpdmEndSessionResponse — capture after teardown
+            spdm_trace::emit_r2_event(
+                TraceRole::Responder,
+                "WriteSpdmEndSessionResponse",
+                TraceR2Fields {
+                    session_id: Some(pre_teardown_id),
+                    session_state: Some("NotStarted"),
+                    ..Default::default()
+                },
+            );
         } else if (opcode == SpdmRequestResponseCode::SpdmResponseFinishRsp.get_u8()
             || opcode == SpdmRequestResponseCode::SpdmResponsePskFinishRsp.get_u8())
             && session_id.is_some()
@@ -267,6 +290,24 @@ impl ResponderContext {
             };
             spdm_trace::note_transcript(TraceRole::Responder, TraceTranscriptPhase::Established);
             spdm_trace::observe_local_state(TraceRole::Responder, &self.common, Some(session_id));
+
+            // R2/R3: CompleteFinish (only for cert-based sessions, not PSK)
+            {
+                let is_psk = self.common.get_immutable_session_via_id(session_id)
+                    .map(|s| s.get_use_psk())
+                    .unwrap_or(false);
+                if !is_psk {
+                    spdm_trace::emit_r2_event(
+                        TraceRole::Responder,
+                        "CompleteFinish",
+                        TraceR2Fields {
+                            session_id: Some(session_id),
+                            session_state: Some("Established"),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
 
             if self
                 .common

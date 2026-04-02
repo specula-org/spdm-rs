@@ -12,6 +12,7 @@ use crate::error::SPDM_STATUS_INVALID_STATE_PEER;
 use crate::message::*;
 use crate::protocol::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 extern crate alloc;
 use crate::error::SpdmResult;
 use alloc::boxed::Box;
@@ -194,6 +195,14 @@ impl ResponderContext {
             }
             Some(_session_id) => {}
         }
+
+        spdm_trace::emit_local_event(
+            TraceRole::Responder,
+            &self.common,
+            None,
+            "HandshakeAdvance",
+            TraceMessage::default(),
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

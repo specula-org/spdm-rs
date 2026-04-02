@@ -22,7 +22,7 @@ use crate::crypto::SpdmReqExchangeContext;
 
 use crate::error::SpdmResult;
 use crate::message::*;
-use crate::spdm_trace::{self, TraceMessage, TraceRole};
+use crate::spdm_trace::{self, TraceMessage, TraceRole, TraceR2Fields};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -57,6 +57,12 @@ impl RequesterContext {
             slot_id,
             measurement_summary_hash_type,
         )?;
+
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendKeyExchange",
+            TraceR2Fields::default(),
+        );
 
         Ok((req_session_id, key_exchange_context, send_used))
     }
@@ -544,6 +550,16 @@ impl RequesterContext {
                                 Some(session_id),
                                 "HandleSpdmKeyExchangeResponse",
                                 TraceMessage::default(),
+                            );
+
+                            // R2: emit with session info
+                            spdm_trace::emit_r2_event(
+                                TraceRole::Requester,
+                                "HandleSpdmKeyExchangeResponse",
+                                TraceR2Fields {
+                                    req_connection_state: Some(self.common.runtime_info.get_connection_state()),
+                                    ..Default::default()
+                                },
                             );
 
                             Ok(())

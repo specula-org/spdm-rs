@@ -5,6 +5,7 @@
 use crate::error::{SpdmResult, SPDM_STATUS_ERROR_PEER, SPDM_STATUS_INVALID_MSG_FIELD};
 use crate::message::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -18,6 +19,11 @@ impl RequesterContext {
 
         let mut send_buffer = [0u8; config::MAX_SPDM_MSG_SIZE];
         let used = self.encode_spdm_heartbeat(&mut send_buffer)?;
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendHeartbeat",
+            TraceR2Fields { session_id: Some(session_id), ..Default::default() },
+        );
         self.send_message(Some(session_id), &send_buffer[..used], false)
             .await
     }
@@ -67,6 +73,11 @@ impl RequesterContext {
                             SpdmHeartbeatResponsePayload::spdm_read(&mut self.common, &mut reader);
                         if let Some(heartbeat_rsp) = heartbeat_rsp {
                             debug!("!!! heartbeat rsp : {:02x?}\n", heartbeat_rsp);
+                            spdm_trace::emit_r2_event(
+                                TraceRole::Requester,
+                                "HandleSpdmHeartbeatResponse",
+                                TraceR2Fields { session_id: Some(session_id), ..Default::default() },
+                            );
                             Ok(())
                         } else {
                             error!("!!! heartbeat : fail !!!\n");

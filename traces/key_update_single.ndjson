@@ -1,0 +1,2 @@
+{"event":"ResponderHandleKeyUpdate","ts":1775069000923216509,"connectionState":"NotStarted","rsSessionState":"Established","rqReqKey":1,"rqRespKey":1,"rsReqKey":2,"rsRespKey":1,"rsReqBackupValid":true,"rsRespBackupValid":false,"op":"UpdateSingle"}
+{"event":"ResponderHandleKeyUpdate","ts":1775069000923249538,"connectionState":"NotStarted","rsSessionState":"Established","rqReqKey":1,"rqRespKey":1,"rsReqKey":2,"rsRespKey":1,"rsReqBackupValid":false,"rsRespBackupValid":false,"op":"VerifyNewKey"}

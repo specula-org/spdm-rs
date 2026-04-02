@@ -8,7 +8,7 @@ use crate::error::SPDM_STATUS_INVALID_MSG_FIELD;
 use crate::error::SPDM_STATUS_INVALID_STATE_LOCAL;
 use crate::message::*;
 use crate::responder::*;
-use crate::spdm_trace::{self, TraceKeyUpdateOp, TraceMessage, TraceRole};
+use crate::spdm_trace::{self, TraceKeyUpdateOp, TraceMessage, TraceRole, TraceR2Fields};
 
 impl ResponderContext {
     pub fn handle_spdm_key_update<'a>(
@@ -74,17 +74,23 @@ impl ResponderContext {
         };
         match key_update_req.key_update_operation {
             SpdmKeyUpdateOperation::SpdmUpdateSingleKey => {
-                let _ = session.create_data_secret_update(spdm_version_sel, true, false);
-                spdm_trace::note_key_update_response(TraceKeyUpdateOp::UpdateSingle);
+                let create_res = session.create_data_secret_update(spdm_version_sel, true, false);
+                let req_ok = create_res.is_ok();
+                let _ = create_res;
+                spdm_trace::note_key_update_response(TraceKeyUpdateOp::UpdateSingle, req_ok, true);
             }
             SpdmKeyUpdateOperation::SpdmUpdateAllKeys => {
-                let _ = session.create_data_secret_update(spdm_version_sel, true, true);
-                let _ = session.activate_data_secret_update(spdm_version_sel, false, true, true);
-                spdm_trace::note_key_update_response(TraceKeyUpdateOp::UpdateAll);
+                let create_res = session.create_data_secret_update(spdm_version_sel, true, true);
+                let req_ok = create_res.is_ok();
+                let _ = create_res;
+                let activate_res = session.activate_data_secret_update(spdm_version_sel, false, true, true);
+                let resp_ok = activate_res.is_ok();
+                let _ = activate_res;
+                spdm_trace::note_key_update_response(TraceKeyUpdateOp::UpdateAll, req_ok, resp_ok);
             }
             SpdmKeyUpdateOperation::SpdmVerifyNewKey => {
                 let _ = session.activate_data_secret_update(spdm_version_sel, true, false, true);
-                spdm_trace::note_key_update_response(TraceKeyUpdateOp::VerifyNewKey);
+                spdm_trace::note_key_update_response(TraceKeyUpdateOp::VerifyNewKey, true, true);
             }
             _ => {
                 error!("!!! key_update req : fail !!!\n");
@@ -127,12 +133,29 @@ impl ResponderContext {
             TraceRole::Responder,
             &self.common,
             session_id,
-            "WriteSpdmKeyUpdateResponse",
+            "ResponderHandleKeyUpdate",
             TraceMessage {
                 op: Some(op),
                 ..TraceMessage::default()
             },
         );
+
+        // R2: emit with session backup state
+        {
+            let (rbv, sbv) = self.common.get_immutable_session_via_id(session_id)
+                .map(|s| (s.get_requester_backup_valid(), s.get_responder_backup_valid()))
+                .unwrap_or((false, false));
+            spdm_trace::emit_r2_event(
+                TraceRole::Responder,
+                "WriteSpdmKeyUpdateResponse",
+                TraceR2Fields {
+                    session_id: Some(session_id),
+                    req_backup_valid: Some(rbv),
+                    rsp_backup_valid: Some(sbv),
+                    ..Default::default()
+                },
+            );
+        }
 
         (Ok(()), Some(writer.used_slice()))
     }

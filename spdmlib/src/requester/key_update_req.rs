@@ -9,7 +9,7 @@ use crate::error::{
 use crate::message::*;
 use crate::requester::*;
 use crate::spdm_trace::{
-    self, TraceErrorKind, TraceKeyUpdateOp, TraceMessage, TraceRole,
+    self, TraceErrorKind, TraceKeyUpdateOp, TraceMessage, TraceRole, TraceR2Fields,
 };
 
 impl RequesterContext {
@@ -31,6 +31,38 @@ impl RequesterContext {
         let used = self.encode_spdm_key_update_op(key_update_operation, tag, &mut send_buffer)?;
         self.send_message(Some(session_id), &send_buffer[..used], false)
             .await?;
+
+        spdm_trace::emit_local_event(
+            TraceRole::Requester,
+            &self.common,
+            Some(session_id),
+            "SendKeyUpdate",
+            TraceMessage {
+                op: Some(match key_update_operation {
+                    SpdmKeyUpdateOperation::SpdmUpdateSingleKey => TraceKeyUpdateOp::UpdateSingle,
+                    SpdmKeyUpdateOperation::SpdmUpdateAllKeys => TraceKeyUpdateOp::UpdateAll,
+                    SpdmKeyUpdateOperation::SpdmVerifyNewKey => TraceKeyUpdateOp::VerifyNewKey,
+                    _ => TraceKeyUpdateOp::VerifyNewKey,
+                }),
+                ..TraceMessage::default()
+            },
+        );
+
+        // R2: emit key update send
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendKeyUpdate",
+            TraceR2Fields {
+                session_id: Some(session_id),
+                op: Some(match key_update_operation {
+                    SpdmKeyUpdateOperation::SpdmUpdateSingleKey => "OpUpdateSingle",
+                    SpdmKeyUpdateOperation::SpdmUpdateAllKeys => "OpUpdateAll",
+                    SpdmKeyUpdateOperation::SpdmVerifyNewKey => "OpVerifyNewKey",
+                    _ => "OpVerifyNewKey",
+                }),
+                ..Default::default()
+            },
+        );
 
         Ok(())
     }
@@ -128,7 +160,7 @@ impl RequesterContext {
                                 TraceRole::Requester,
                                 &self.common,
                                 session_id,
-                                "HandleSpdmKeyUpdateOpResponse",
+                                "RequesterHandleKeyUpdateAck",
                                 TraceMessage {
                                     op: Some(match key_update_rsp.key_update_operation {
                                         SpdmKeyUpdateOperation::SpdmUpdateSingleKey => TraceKeyUpdateOp::UpdateSingle,
@@ -139,6 +171,21 @@ impl RequesterContext {
                                     ..TraceMessage::default()
                                 },
                             );
+                            // R2: emit with session backup state
+                            {
+                                let session = self.common.get_immutable_session_via_id(session_id);
+                                let (rbv, sbv) = session.map(|s| (s.get_requester_backup_valid(), s.get_responder_backup_valid())).unwrap_or((false, false));
+                                spdm_trace::emit_r2_event(
+                                    TraceRole::Requester,
+                                    "HandleSpdmKeyUpdateResponse",
+                                    TraceR2Fields {
+                                        session_id: Some(session_id),
+                                        req_backup_valid: Some(rbv),
+                                        rsp_backup_valid: Some(sbv),
+                                        ..Default::default()
+                                    },
+                                );
+                            }
                             Ok(())
                         } else {
                             error!("!!! key_update : fail !!!\n");

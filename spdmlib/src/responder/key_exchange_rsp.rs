@@ -18,7 +18,7 @@ use crate::error::{
 use crate::message::*;
 use crate::protocol::*;
 use crate::responder::*;
-use crate::spdm_trace::{self, TraceMessage, TraceRole};
+use crate::spdm_trace::{self, TraceMessage, TraceRole, TraceR2Fields};
 extern crate alloc;
 use crate::common::opaque::SpdmOpaqueStruct;
 use crate::secret;
@@ -380,6 +380,14 @@ impl ResponderContext {
         let session = self.common.get_next_avaiable_session();
         if session.is_none() {
             error!("!!! too many sessions : fail !!!\n");
+            spdm_trace::emit_r2_event(
+                TraceRole::Responder,
+                "WriteSpdmKeyExchangeResponseAllSlotsFull",
+                TraceR2Fields {
+                    error: Some("SessionNumberExceed"),
+                    ..Default::default()
+                },
+            );
             self.write_spdm_error(SpdmErrorCode::SpdmErrorSessionLimitExceeded, 0, writer);
             return (
                 Err(SPDM_STATUS_INVALID_STATE_LOCAL),
@@ -666,6 +674,19 @@ impl ResponderContext {
             Some(session_id),
             "WriteSpdmKeyExchangeResponse",
             TraceMessage::default(),
+        );
+
+        // R2/R3: emit with session ID, state, and mode
+        spdm_trace::emit_r2_event(
+            TraceRole::Responder,
+            "WriteSpdmKeyExchangeResponse",
+            TraceR2Fields {
+                session_id: Some(session_id),
+                session_state: Some("Handshaking"),
+                session_mode: Some("Cert"),
+                rsp_connection_state: Some(self.common.runtime_info.get_connection_state()),
+                ..Default::default()
+            },
         );
 
         (Ok(()), Some(writer.used_slice()))

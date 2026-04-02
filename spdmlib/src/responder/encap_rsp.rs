@@ -19,6 +19,8 @@ use crate::{
     protocol::{SpdmRequestCapabilityFlags, SpdmResponseCapabilityFlags, SpdmVersion},
 };
 
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
+
 use super::ResponderContext;
 
 impl ResponderContext {
@@ -89,6 +91,16 @@ impl ResponderContext {
                 Some(writer.used_slice()),
             );
         }
+
+        // R3: ResponderSendEncapDigest
+        spdm_trace::emit_r2_event(
+            TraceRole::Responder,
+            "ResponderSendEncapDigest",
+            TraceR2Fields {
+                encap_state: Some("Digest"),
+                ..Default::default()
+            },
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }
@@ -232,7 +244,19 @@ impl ResponderContext {
                 self.handle_encap_response_digest(encap_response)?;
 
                 let _ = ack_params.spdm_encode(&mut self.common, encap_response_ack);
-                self.encode_encap_requst_get_certificate(encap_response_ack)
+                let result = self.encode_encap_requst_get_certificate(encap_response_ack);
+
+                // R3: ResponderProcessDigestSendCert
+                spdm_trace::emit_r2_event(
+                    TraceRole::Responder,
+                    "ResponderProcessDigestSendCert",
+                    TraceR2Fields {
+                        encap_state: Some("Cert"),
+                        ..Default::default()
+                    },
+                );
+
+                result
             }
             SpdmRequestResponseCode::SpdmResponseCertificate => {
                 match self.handle_encap_response_certificate(encap_response) {

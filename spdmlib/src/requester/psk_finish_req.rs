@@ -9,6 +9,7 @@ use crate::error::{
 use crate::message::*;
 use crate::protocol::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 extern crate alloc;
 use alloc::boxed::Box;
 
@@ -36,6 +37,11 @@ impl RequesterContext {
             return Err(res.err().unwrap());
         }
         let send_used = res.unwrap();
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendPskFinish",
+            TraceR2Fields { session_id: Some(session_id), ..Default::default() },
+        );
         let res = self
             .send_message(Some(session_id), &send_buffer[..send_used], false)
             .await;
@@ -183,6 +189,16 @@ impl RequesterContext {
                             session.generate_data_secret(spdm_version_sel, &th2)?;
                             session.set_session_state(
                                 crate::common::session::SpdmSessionState::SpdmSessionEstablished,
+                            );
+
+                            // R3: HandleSpdmPskFinishResponse — session Established
+                            spdm_trace::emit_r2_event(
+                                TraceRole::Requester,
+                                "HandleSpdmPskFinishResponse",
+                                TraceR2Fields {
+                                    session_state: Some("Established"),
+                                    ..Default::default()
+                                },
                             );
 
                             Ok(())

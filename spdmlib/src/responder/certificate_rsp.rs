@@ -11,6 +11,7 @@ use crate::error::SPDM_STATUS_INVALID_STATE_PEER;
 use crate::message::*;
 use crate::protocol::SPDM_MAX_SLOT_NUMBER;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 
 impl ResponderContext {
     pub fn handle_spdm_certificate<'a>(
@@ -171,6 +172,14 @@ impl ResponderContext {
             }
             Some(_session_id) => {}
         }
+
+        spdm_trace::emit_local_event(
+            TraceRole::Responder,
+            &self.common,
+            None,
+            "HandshakeAdvance",
+            TraceMessage::default(),
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

@@ -13,6 +13,7 @@ use crate::error::{SPDM_STATUS_BUFFER_FULL, SPDM_STATUS_INVALID_STATE_LOCAL};
 use crate::message::*;
 use crate::protocol::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 extern crate alloc;
 use core::ops::DerefMut;
 
@@ -43,6 +44,11 @@ impl RequesterContext {
             send_buffer,
         )?;
 
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendPskExchange",
+            TraceR2Fields::default(),
+        );
         self.send_message(None, &send_buffer[..send_used], false)
             .await?;
 
@@ -313,6 +319,16 @@ impl RequesterContext {
                                 .ok_or(SPDM_STATUS_INVALID_PARAMETER)?;
                             session.set_session_state(
                                 crate::common::session::SpdmSessionState::SpdmSessionHandshaking,
+                            );
+
+                            // R3: HandleSpdmPskExchangeResponse — session Handshaking
+                            spdm_trace::emit_r2_event(
+                                TraceRole::Requester,
+                                "HandleSpdmPskExchangeResponse",
+                                TraceR2Fields {
+                                    session_state: Some("Handshaking"),
+                                    ..Default::default()
+                                },
                             );
 
                             let session = self

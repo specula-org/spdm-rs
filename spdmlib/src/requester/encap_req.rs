@@ -23,6 +23,8 @@ use crate::{
     },
 };
 
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
+
 use super::RequesterContext;
 
 impl RequesterContext {
@@ -49,6 +51,13 @@ impl RequesterContext {
         {
             return Err(SPDM_STATUS_UNSUPPORTED_CAP);
         }
+
+        // R3: RequesterStartEncapExchange
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterStartEncapExchange",
+            TraceR2Fields { session_id: Some(session_id), ..Default::default() },
+        );
 
         match mut_auth_requested {
             // Optimized session-based mutual authentication
@@ -77,6 +86,17 @@ impl RequesterContext {
         }
 
         while self.receive_encapsulated_response_ack(session_id).await? {}
+
+        // R3: RequesterReceiveEncapDone
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterReceiveEncapDone",
+            TraceR2Fields {
+                encap_state: Some("Done"),
+                ..Default::default()
+            },
+        );
+
         Ok(())
     }
 
@@ -211,10 +231,22 @@ impl RequesterContext {
             SpdmMessageHeader::read(&mut reader).ok_or(SPDM_STATUS_INVALID_MSG_FIELD)?;
         match encap_header.request_response_code {
             crate::message::SpdmRequestResponseCode::SpdmRequestGetDigests => {
-                self.encap_handle_get_digest(encap_request, &mut writer)
+                self.encap_handle_get_digest(encap_request, &mut writer);
+                // R3: RequesterDeliverEncapDigestResponse
+                spdm_trace::emit_r2_event(
+                    TraceRole::Requester,
+                    "RequesterDeliverEncapDigestResponse",
+                    TraceR2Fields::default(),
+                );
             }
             crate::message::SpdmRequestResponseCode::SpdmRequestGetCertificate => {
-                self.encap_handle_get_certificate(encap_request, &mut writer)
+                self.encap_handle_get_certificate(encap_request, &mut writer);
+                // R3: RequesterDeliverEncapCertResponse
+                spdm_trace::emit_r2_event(
+                    TraceRole::Requester,
+                    "RequesterDeliverEncapCertResponse",
+                    TraceR2Fields::default(),
+                );
             }
             _ => self.encode_encap_error_response(
                 SpdmErrorCode::SpdmErrorUnexpectedRequest,

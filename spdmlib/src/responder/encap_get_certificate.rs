@@ -21,6 +21,8 @@ use crate::{
     protocol::{SpdmCertChainBuffer, SpdmCertChainData},
 };
 
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
+
 use super::ResponderContext;
 
 impl ResponderContext {
@@ -161,6 +163,19 @@ impl ResponderContext {
         #[cfg(feature = "mandatory-mut-auth")]
         if result.is_ok() {
             self.common.mut_auth_done = true;
+        }
+
+        // R3: ResponderCompleteEncapExchange — cert verified, mut_auth_done set
+        if result.is_ok() {
+            spdm_trace::emit_r2_event(
+                TraceRole::Responder,
+                "ResponderCompleteEncapExchange",
+                TraceR2Fields {
+                    mut_auth_done: Some(true),
+                    encap_state: Some("Done"),
+                    ..Default::default()
+                },
+            );
         }
 
         result

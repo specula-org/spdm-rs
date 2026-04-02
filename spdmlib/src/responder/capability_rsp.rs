@@ -11,6 +11,7 @@ use crate::error::SPDM_STATUS_INVALID_STATE_PEER;
 use crate::message::*;
 use crate::protocol::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole, TraceR2Fields};
 
 impl ResponderContext {
     pub fn handle_spdm_capability<'a>(
@@ -152,6 +153,27 @@ impl ResponderContext {
                 Some(writer.used_slice()),
             );
         }
+
+        spdm_trace::emit_local_event(
+            TraceRole::Responder,
+            &self.common,
+            None,
+            "HandshakeAdvance",
+            TraceMessage::default(),
+        );
+
+        // R2: emit after storing both sides' capabilities
+        spdm_trace::emit_r2_event(
+            TraceRole::Responder,
+            "WriteSpdmCapabilitiesResponse",
+            TraceR2Fields {
+                rsp_connection_state: Some(SpdmConnectionState::SpdmConnectionAfterCapabilities),
+                req_capabilities: Some(spdm_trace::req_cap_flags(self.common.negotiate_info.req_capabilities_sel)),
+                rsp_capabilities: Some(spdm_trace::rsp_cap_flags(self.common.negotiate_info.rsp_capabilities_sel)),
+                rsp_caps: Some(spdm_trace::rsp_cap_flags(self.common.config_info.rsp_capabilities)),
+                ..Default::default()
+            },
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

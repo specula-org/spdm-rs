@@ -10,6 +10,7 @@ use crate::message::*;
 use crate::protocol::SpdmRequestCapabilityFlags;
 use crate::protocol::SpdmResponseCapabilityFlags;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 use crate::watchdog::stop_watchdog;
 
 impl ResponderContext {
@@ -95,6 +96,14 @@ impl ResponderContext {
                 Some(writer.used_slice()),
             );
         }
+
+        spdm_trace::emit_local_event(
+            TraceRole::Responder,
+            &self.common,
+            Some(session_id),
+            "HandleEndSession",
+            TraceMessage::default(),
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

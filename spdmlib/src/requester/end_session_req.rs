@@ -8,6 +8,7 @@ use crate::error::{
 };
 use crate::message::*;
 use crate::requester::*;
+use crate::spdm_trace::{self, TraceRole, TraceR2Fields};
 
 impl RequesterContext {
     #[maybe_async::maybe_async]
@@ -23,6 +24,11 @@ impl RequesterContext {
         );
 
         let used = self.encode_spdm_end_session(send_buffer)?;
+        spdm_trace::emit_r2_event(
+            TraceRole::Requester,
+            "RequesterSendEndSession",
+            TraceR2Fields { session_id: Some(session_id), ..Default::default() },
+        );
         self.send_message(Some(session_id), &send_buffer[..used], false)
             .await?;
         Ok(used)
@@ -87,7 +93,14 @@ impl RequesterContext {
                                 } else {
                                     return Err(SPDM_STATUS_INVALID_PARAMETER);
                                 };
+                            let pre_id = session.get_session_id();
                             session.teardown();
+
+                            spdm_trace::emit_r2_event(
+                                TraceRole::Requester,
+                                "HandleSpdmEndSessionResponse",
+                                TraceR2Fields { session_id: Some(pre_id), ..Default::default() },
+                            );
 
                             Ok(())
                         } else {

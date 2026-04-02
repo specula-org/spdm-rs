@@ -18,6 +18,7 @@ use crate::error::{SPDM_STATUS_BUFFER_FULL, SPDM_STATUS_CRYPTO_ERROR};
 use crate::message::*;
 use crate::protocol::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole};
 use crate::secret;
 
 impl ResponderContext {
@@ -271,6 +272,17 @@ impl ResponderContext {
 
         self.common.reset_message_b();
         self.common.reset_message_c();
+
+        spdm_trace::emit_local_event(
+            TraceRole::Responder,
+            &self.common,
+            None,
+            "HandleChallenge",
+            TraceMessage {
+                slot: Some(slot_id as u8),
+                ..TraceMessage::default()
+            },
+        );
 
         (Ok(()), Some(writer.used_slice()))
     }

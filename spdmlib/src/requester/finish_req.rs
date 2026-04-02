@@ -346,32 +346,20 @@ impl RequesterContext {
                             crate::common::session::SpdmSessionState::SpdmSessionEstablished,
                         );
 
+                        spdm_trace::note_data_secret_generated(TraceRole::Requester);
                         spdm_trace::note_transcript(
                             TraceRole::Requester,
                             TraceTranscriptPhase::Established,
                         );
                         self.common.runtime_info.set_last_session_id(None);
-                        spdm_trace::emit_finish_event(
+                        spdm_trace::emit_key_event(
                             TraceRole::Requester,
                             &self.common,
                             session_id,
-                            if self
-                                .common
-                                .negotiate_info
-                                .req_capabilities_sel
-                                .contains(
-                                    SpdmRequestCapabilityFlags::HANDSHAKE_IN_THE_CLEAR_CAP,
-                                )
-                                && self
-                                    .common
-                                    .negotiate_info
-                                    .rsp_capabilities_sel
-                                    .contains(
-                                        SpdmResponseCapabilityFlags::HANDSHAKE_IN_THE_CLEAR_CAP,
-                                    ) {
-                                "CompleteFinishHandshakeInClear"
-                            } else {
-                                "CompleteFinishSecured"
+                            "RequesterReceiveFinishResp",
+                            spdm_trace::TraceMessage {
+                                data_secret_ok: Some(true),
+                                ..spdm_trace::TraceMessage::default()
                             },
                         );
 

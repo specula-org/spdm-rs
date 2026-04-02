@@ -11,6 +11,8 @@ use crate::error::SPDM_STATUS_INVALID_STATE_PEER;
 use crate::message::*;
 use crate::protocol::*;
 use crate::responder::*;
+use crate::spdm_trace::{self, TraceMessage, TraceRole, TraceR2Fields};
+extern crate alloc;
 
 static PQC_FIRST: bool = false;
 
@@ -480,6 +482,45 @@ impl ResponderContext {
                 Err(SPDM_STATUS_INVALID_STATE_LOCAL),
                 Some(writer.used_slice()),
             );
+        }
+
+        spdm_trace::emit_local_event(
+            TraceRole::Responder,
+            &self.common,
+            None,
+            "HandshakeAdvance",
+            TraceMessage::default(),
+        );
+
+        // R2: emit after prioritize() and response encoding
+        spdm_trace::emit_r2_event(
+            TraceRole::Responder,
+            "WriteSpdmAlgorithmsResponse",
+            TraceR2Fields {
+                rsp_connection_state: Some(SpdmConnectionState::SpdmConnectionNegotiated),
+                negotiated_algo: Some(spdm_trace::algo_name(self.common.negotiate_info.base_hash_sel)),
+                rsp_supported: Some({
+                    let mut algos = alloc::vec::Vec::new();
+                    algos.push(spdm_trace::algo_name(self.common.config_info.base_hash_algo));
+                    algos
+                }),
+                ..Default::default()
+            },
+        );
+
+        // R3: SelectPskCapMode — emit after algorithms when connection is Negotiated
+        if let Some(mode) = spdm_trace::rsp_psk_cap_mode(self.common.negotiate_info.rsp_capabilities_sel) {
+            if self.common.negotiate_info.req_capabilities_sel
+                .contains(SpdmRequestCapabilityFlags::PSK_CAP) {
+                spdm_trace::emit_r2_event(
+                    TraceRole::Responder,
+                    "SelectPskCapMode",
+                    TraceR2Fields {
+                        psk_cap_mode: Some(mode),
+                        ..Default::default()
+                    },
+                );
+            }
         }
 
         (Ok(()), Some(writer.used_slice()))

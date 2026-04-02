@@ -6,6 +6,8 @@ use crate::common::session::{SpdmSession, SpdmSessionState};
 use crate::common::{SpdmConnectionState, SpdmContext};
 use spin::Mutex;
 
+extern crate alloc;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TraceRole {
     Requester,
@@ -22,10 +24,14 @@ pub enum TraceTranscriptPhase {
     Established,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TraceKeyState {
-    Old,
-    New,
+/// Key generation state per-side per-direction.
+/// 0 = no key, 1 = initial (post-FINISH), 2+ = after key updates.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TraceKeyGens {
+    pub rq_req: u32,
+    pub rq_resp: u32,
+    pub rs_req: u32,
+    pub rs_resp: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,8 +59,7 @@ pub struct TracePeerState {
 pub struct TraceStateSnapshot {
     pub requester: Option<TracePeerState>,
     pub responder: Option<TracePeerState>,
-    pub req_key_state: Option<TraceKeyState>,
-    pub rsp_key_state: Option<TraceKeyState>,
+    pub key_gens: Option<TraceKeyGens>,
     pub req_backup_valid: Option<bool>,
     pub rsp_backup_valid: Option<bool>,
 }
@@ -66,14 +71,21 @@ pub struct TraceMessage {
     pub op: Option<TraceKeyUpdateOp>,
     pub slot_mask: Option<u8>,
     pub error: Option<TraceErrorKind>,
+    pub hmac_ok: Option<bool>,
+    pub data_secret_ok: Option<bool>,
+    pub req_ok: Option<bool>,
+    pub resp_ok: Option<bool>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct TraceEvent {
     pub name: &'static str,
     pub nid: &'static str,
     pub state: TraceStateSnapshot,
     pub msg: TraceMessage,
+    /// Round 2 extension fields (capabilities, algorithms, session lifecycle).
+    /// None for Round 1 events.
+    pub r2: Option<TraceR2Fields>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -82,8 +94,7 @@ struct TraceRuntime {
     requester_connection: SpdmConnectionState,
     requester_transcript: TraceTranscriptPhase,
     responder_transcript: TraceTranscriptPhase,
-    req_key_state: TraceKeyState,
-    rsp_key_state: TraceKeyState,
+    key_gens: TraceKeyGens,
     requester_last: TracePeerState,
     responder_last: TracePeerState,
 }
@@ -95,8 +106,7 @@ impl Default for TraceRuntime {
             requester_connection: SpdmConnectionState::SpdmConnectionNotStarted,
             requester_transcript: TraceTranscriptPhase::Empty,
             responder_transcript: TraceTranscriptPhase::Empty,
-            req_key_state: TraceKeyState::Old,
-            rsp_key_state: TraceKeyState::Old,
+            key_gens: TraceKeyGens::default(),
             requester_last: TracePeerState::default(),
             responder_last: TracePeerState::default(),
         }
@@ -108,8 +118,12 @@ static TRACE_RUNTIME: Mutex<TraceRuntime> = Mutex::new(TraceRuntime {
     requester_connection: SpdmConnectionState::SpdmConnectionNotStarted,
     requester_transcript: TraceTranscriptPhase::Empty,
     responder_transcript: TraceTranscriptPhase::Empty,
-    req_key_state: TraceKeyState::Old,
-    rsp_key_state: TraceKeyState::Old,
+    key_gens: TraceKeyGens {
+        rq_req: 0,
+        rq_resp: 0,
+        rs_req: 0,
+        rs_resp: 0,
+    },
     requester_last: TracePeerState {
         connection_state: None,
         session_state: None,
@@ -152,38 +166,63 @@ pub fn note_connection(role: TraceRole, connection_state: SpdmConnectionState) {
     }
 }
 
-pub fn note_key_update_response(op: TraceKeyUpdateOp) {
+/// Responder completed key update. Increment responder-side key gens.
+pub fn note_key_update_response(op: TraceKeyUpdateOp, req_ok: bool, resp_ok: bool) {
     let mut runtime = TRACE_RUNTIME.lock();
     match op {
-        TraceKeyUpdateOp::UpdateSingle => runtime.req_key_state = TraceKeyState::New,
+        TraceKeyUpdateOp::UpdateSingle => {
+            if req_ok { runtime.key_gens.rs_req += 1; }
+        }
         TraceKeyUpdateOp::UpdateAll => {
-            runtime.req_key_state = TraceKeyState::New;
-            runtime.rsp_key_state = TraceKeyState::New;
+            if req_ok { runtime.key_gens.rs_req += 1; }
+            if resp_ok { runtime.key_gens.rs_resp += 1; }
         }
         TraceKeyUpdateOp::VerifyNewKey => {}
     }
 }
 
+/// Requester received KEY_UPDATE_ACK. Increment requester-side key gens.
 pub fn note_key_update_ack(op: TraceKeyUpdateOp) {
     let mut runtime = TRACE_RUNTIME.lock();
     match op {
-        TraceKeyUpdateOp::UpdateSingle => runtime.req_key_state = TraceKeyState::New,
+        TraceKeyUpdateOp::UpdateSingle => {
+            runtime.key_gens.rq_req += 1;
+        }
         TraceKeyUpdateOp::UpdateAll => {
-            runtime.req_key_state = TraceKeyState::New;
-            runtime.rsp_key_state = TraceKeyState::New;
+            runtime.key_gens.rq_req += 1;
+            runtime.key_gens.rq_resp += 1;
         }
         TraceKeyUpdateOp::VerifyNewKey => {}
     }
 }
 
-pub fn note_key_update_rollback(req_backup_valid: bool, rsp_backup_valid: bool) {
+pub fn note_key_update_rollback(_req_backup_valid: bool, _rsp_backup_valid: bool) {
+    // Rollback doesn't change gen counters — the backup was the previous gen,
+    // and on rollback the active key reverts to backup (gen stays the same).
+}
+
+/// Data secret generated successfully after FINISH. Set initial key gen = 1.
+pub fn note_data_secret_generated(role: TraceRole) {
     let mut runtime = TRACE_RUNTIME.lock();
-    if req_backup_valid {
-        runtime.req_key_state = TraceKeyState::Old;
+    match role {
+        TraceRole::Requester => {
+            runtime.key_gens.rq_req = 1;
+            runtime.key_gens.rq_resp = 1;
+        }
+        TraceRole::Responder => {
+            runtime.key_gens.rs_req = 1;
+            runtime.key_gens.rs_resp = 1;
+        }
     }
-    if rsp_backup_valid {
-        runtime.rsp_key_state = TraceKeyState::Old;
-    }
+}
+
+/// GetVersion resets all state including keys.
+pub fn note_reset() {
+    let mut runtime = TRACE_RUNTIME.lock();
+    runtime.key_gens = TraceKeyGens::default();
+    runtime.requester_transcript = TraceTranscriptPhase::Empty;
+    runtime.responder_transcript = TraceTranscriptPhase::Empty;
+    runtime.requester_connection = SpdmConnectionState::SpdmConnectionNotStarted;
 }
 
 pub fn observe_local_state(role: TraceRole, context: &SpdmContext, session_id: Option<u32>) {
@@ -243,7 +282,7 @@ fn emit_event(
 ) {
     let local = local_peer_state(role, context, session_id);
 
-    let (callback, remote, req_key_state, rsp_key_state) = {
+    let (callback, remote, key_gens) = {
         let mut runtime = TRACE_RUNTIME.lock();
         match role {
             TraceRole::Requester => runtime.requester_last = local,
@@ -262,8 +301,7 @@ fn emit_event(
         (
             runtime.callback,
             remote,
-            runtime.req_key_state,
-            runtime.rsp_key_state,
+            runtime.key_gens,
         )
     };
 
@@ -294,8 +332,7 @@ fn emit_event(
                     )
                 })
                 .unwrap_or((false, false));
-            state.req_key_state = Some(req_key_state);
-            state.rsp_key_state = Some(rsp_key_state);
+            state.key_gens = Some(key_gens);
             state.req_backup_valid = Some(req_backup_valid);
             state.rsp_backup_valid = Some(rsp_backup_valid);
         }
@@ -305,6 +342,7 @@ fn emit_event(
             nid: role_name(role),
             state,
             msg,
+            r2: None,
         };
         callback(&event);
     }
@@ -348,5 +386,150 @@ fn role_name(role: TraceRole) -> &'static str {
     match role {
         TraceRole::Requester => "requester",
         TraceRole::Responder => "responder",
+    }
+}
+
+// ============================================================================
+// Round 2 trace extension — capabilities, algorithms, session lifecycle
+// ============================================================================
+
+/// Round 2/3 event fields for capabilities, algorithms, session lifecycle,
+/// PSK sessions, mutual auth, and chunking.
+/// All fields are optional; only populated fields are emitted.
+#[derive(Clone, Debug, Default)]
+pub struct TraceR2Fields {
+    pub req_connection_state: Option<SpdmConnectionState>,
+    pub rsp_connection_state: Option<SpdmConnectionState>,
+    pub negotiated_version: Option<u8>,
+    pub req_caps: Option<alloc::vec::Vec<&'static str>>,
+    pub rsp_caps: Option<alloc::vec::Vec<&'static str>>,
+    pub req_capabilities: Option<alloc::vec::Vec<&'static str>>,
+    pub rsp_capabilities: Option<alloc::vec::Vec<&'static str>>,
+    pub proposed: Option<alloc::vec::Vec<&'static str>>,
+    pub rsp_supported: Option<alloc::vec::Vec<&'static str>>,
+    pub negotiated_algo: Option<&'static str>,
+    pub session_id: Option<u32>,
+    pub session_state: Option<&'static str>,
+    pub session_slot: Option<u32>,
+    pub req_backup_valid: Option<bool>,
+    pub rsp_backup_valid: Option<bool>,
+    pub op: Option<&'static str>,
+    pub error: Option<&'static str>,
+    // Round 3: PSK session fields
+    pub session_mode: Option<&'static str>,
+    pub psk_cap_mode: Option<&'static str>,
+    // Round 3: Mutual auth fields
+    pub mut_auth_mode: Option<&'static str>,
+    pub mut_auth_done: Option<bool>,
+    pub encap_state: Option<&'static str>,
+    // Round 3: Chunking fields
+    pub chunk_status: Option<&'static str>,
+    pub chunk_seq_num: Option<u32>,
+    pub chunk_handle: Option<u8>,
+    pub chunk_session_id: Option<u32>,
+}
+
+/// Extract modeled capability flags from request capability bitfield.
+pub fn req_cap_flags(flags: crate::protocol::SpdmRequestCapabilityFlags) -> alloc::vec::Vec<&'static str> {
+    use crate::protocol::SpdmRequestCapabilityFlags;
+    let mut v = alloc::vec::Vec::new();
+    if flags.contains(SpdmRequestCapabilityFlags::HBEAT_CAP) { v.push("HBEAT_CAP"); }
+    if flags.contains(SpdmRequestCapabilityFlags::KEY_UPD_CAP) { v.push("KEY_UPD_CAP"); }
+    if flags.contains(SpdmRequestCapabilityFlags::HANDSHAKE_IN_THE_CLEAR_CAP) { v.push("HANDSHAKE_IN_THE_CLEAR_CAP"); }
+    if flags.contains(SpdmRequestCapabilityFlags::PSK_CAP) { v.push("PSK_CAP"); }
+    if flags.contains(SpdmRequestCapabilityFlags::MUT_AUTH_CAP) { v.push("MUT_AUTH_CAP"); }
+    if flags.contains(SpdmRequestCapabilityFlags::CHUNK_CAP) { v.push("CHUNK_CAP"); }
+    v
+}
+
+/// Extract modeled capability flags from response capability bitfield.
+pub fn rsp_cap_flags(flags: crate::protocol::SpdmResponseCapabilityFlags) -> alloc::vec::Vec<&'static str> {
+    use crate::protocol::SpdmResponseCapabilityFlags;
+    let mut v = alloc::vec::Vec::new();
+    if flags.contains(SpdmResponseCapabilityFlags::HBEAT_CAP) { v.push("HBEAT_CAP"); }
+    if flags.contains(SpdmResponseCapabilityFlags::KEY_UPD_CAP) { v.push("KEY_UPD_CAP"); }
+    if flags.contains(SpdmResponseCapabilityFlags::HANDSHAKE_IN_THE_CLEAR_CAP) { v.push("HANDSHAKE_IN_THE_CLEAR_CAP"); }
+    if flags.contains(SpdmResponseCapabilityFlags::PSK_CAP_WITH_CONTEXT) { v.push("PSK_CAP"); }
+    if flags.contains(SpdmResponseCapabilityFlags::PSK_CAP_WITHOUT_CONTEXT) { v.push("PSK_CAP"); }
+    if flags.contains(SpdmResponseCapabilityFlags::MUT_AUTH_CAP) { v.push("MUT_AUTH_CAP"); }
+    if flags.contains(SpdmResponseCapabilityFlags::CHUNK_CAP) { v.push("CHUNK_CAP"); }
+    v
+}
+
+/// Extract PSK capability mode from response flags.
+pub fn rsp_psk_cap_mode(flags: crate::protocol::SpdmResponseCapabilityFlags) -> Option<&'static str> {
+    use crate::protocol::SpdmResponseCapabilityFlags;
+    if flags.contains(SpdmResponseCapabilityFlags::PSK_CAP_WITH_CONTEXT) {
+        Some("WithContext")
+    } else if flags.contains(SpdmResponseCapabilityFlags::PSK_CAP_WITHOUT_CONTEXT) {
+        Some("WithoutContext")
+    } else {
+        None
+    }
+}
+
+/// Map base_hash_sel to abstract algorithm name for trace.
+pub fn algo_name(hash: crate::protocol::SpdmBaseHashAlgo) -> &'static str {
+    use crate::protocol::SpdmBaseHashAlgo;
+    if hash == SpdmBaseHashAlgo::TPM_ALG_SHA_384 { "a1" }
+    else if hash == SpdmBaseHashAlgo::TPM_ALG_SHA_256 { "a2" }
+    else if hash == SpdmBaseHashAlgo::TPM_ALG_SHA_512 { "a1" }
+    else { "a1" }
+}
+
+/// Map session state enum to string for trace.
+pub fn session_state_str(state: SpdmSessionState) -> &'static str {
+    match state {
+        SpdmSessionState::SpdmSessionNotStarted => "NotStarted",
+        SpdmSessionState::SpdmSessionHandshaking => "Handshaking",
+        SpdmSessionState::SpdmSessionEstablished => "Established",
+        _ => "NotStarted",
+    }
+}
+
+/// Map connection state enum to string for trace.
+pub fn connection_state_str(state: SpdmConnectionState) -> &'static str {
+    match state {
+        SpdmConnectionState::SpdmConnectionNotStarted => "NotStarted",
+        SpdmConnectionState::SpdmConnectionAfterVersion => "AfterVersion",
+        SpdmConnectionState::SpdmConnectionAfterCapabilities => "AfterCapabilities",
+        SpdmConnectionState::SpdmConnectionNegotiated => "Negotiated",
+        SpdmConnectionState::SpdmConnectionAfterCertificate => "AfterCertificate",
+        SpdmConnectionState::SpdmConnectionAuthenticated => "Authenticated",
+        _ => "NotStarted",
+    }
+}
+
+/// Map SpdmVersion to u8 version number for trace.
+/// Spec uses decimal: SPDM 1.0→10, 1.1→11, 1.2→12, etc.
+pub fn version_number(v: crate::protocol::SpdmVersion) -> u8 {
+    use crate::protocol::SpdmVersion;
+    match v {
+        SpdmVersion::SpdmVersion10 => 10,
+        SpdmVersion::SpdmVersion11 => 11,
+        SpdmVersion::SpdmVersion12 => 12,
+        SpdmVersion::SpdmVersion13 => 13,
+        SpdmVersion::SpdmVersion14 => 14,
+    }
+}
+
+/// Emit a Round 2 trace event via the registered callback.
+/// This is a lightweight shim: it builds a TraceEvent with the R2 fields
+/// stored in the `r2` extension field and fires the callback.
+pub fn emit_r2_event(
+    role: TraceRole,
+    name: &'static str,
+    r2: TraceR2Fields,
+) {
+    let callback = TRACE_RUNTIME.lock().callback;
+    if let Some(callback) = callback {
+        let event = TraceEvent {
+            name,
+            nid: role_name(role),
+            state: TraceStateSnapshot::default(),
+            msg: TraceMessage::default(),
+            r2: Some(r2),
+        };
+        callback(&event);
     }
 }
